@@ -49,6 +49,18 @@ namespace CodeCaveInjecter
             UIntPtr dwSize,
             uint dwFreeType
             );
+        [DllImport("kernel32.dll")]
+        public static extern void VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, int dwSize, FreeType dwFreeType);
+        [Flags]
+        public enum FreeType
+        {
+            Decommit = 0x4000,
+            Release = 0x8000,
+        }
+        public void Dealloc(Process Proc, IntPtr AllocatedAddress)
+        {
+            VirtualFreeEx(Proc.Handle, AllocatedAddress, 0, FreeType.Release);
+        }
         [DllImport("kernel32.dll", EntryPoint = "VirtualQueryEx")]
         public static extern UIntPtr Native_VirtualQueryEx(IntPtr hProcess, UIntPtr lpAddress,
             out MEMORY_BASIC_INFORMATION32 lpBuffer, UIntPtr dwLength);
