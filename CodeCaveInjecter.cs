@@ -881,7 +881,6 @@ namespace CodeCaveInjecter
                             List<byte> jmp = new List<byte>(new byte[] { 0xE9 });
                             jmp.AddRange(bAddress);
                             Script.AddRange(jmp);
-                            int[] bug = new int[1];int bugs = bug[99];
                         }
                         else
                         {
