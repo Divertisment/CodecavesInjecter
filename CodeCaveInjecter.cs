@@ -867,6 +867,22 @@ namespace CodeCaveInjecter
                             IntPtr newAddress = CaveAddress + int.Parse(result[1], NumberStyles.HexNumber);
                             Script.AddRange(StringToByteArray(newAddress.ToString(XVar)).Reverse().ToArray());
                         }
+                        else if (xcode.Contains("JmpToAddress"))
+                        {
+                            string sAddress = xcode.Replace("JmpToAddress(", "").Replace(")", "");
+                            string XVar;
+                            if (sAddress.Length <= 8) { XVar = "X8"; } else { XVar = "X16"; }
+                            
+                            int address = int.Parse(sAddress, NumberStyles.HexNumber);
+                            sAddress = address.ToString(XVar);
+
+                            IntPtr Address = (IntPtr)int.Parse(sAddress, NumberStyles.HexNumber);
+                            byte[] bAddress = BitConverter.GetBytes((int)((long)(Address-sAddress.Length +3) - (long)(CaveAddress + Script.ToArray().Length)));
+                            List<byte> jmp = new List<byte>(new byte[] { 0xE9 });
+                            jmp.AddRange(bAddress);
+                            Script.AddRange(jmp);
+                            int[] bug = new int[1];int bugs = bug[99];
+                        }
                         else
                         {
                             Script.AddRange(StringToByteArray(CaveAddress.ToString(XVar)).Reverse().ToArray());
