@@ -1,15 +1,10 @@
-﻿using System;
-using System.IO;
-using System.IO.Pipes;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
-using System.Threading;
 using System.Globalization;
-using System.Windows.Forms;
-using System.Security.Principal;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 namespace CodeCaveInjecter
@@ -279,258 +274,7 @@ namespace CodeCaveInjecter
                              .Where(x => x % 2 == 0)
                              .Select(x => Convert.ToByte(hex.Substring(x, 2), 16))
                              .ToArray();
-        }
-        public UIntPtr getCode(Process process, string name, string path = "", int size = 8)
-        {
-            string theCode = "";
-            Is64Bit = Environment.Is64BitOperatingSystem && (IsWow64Process(process.Handle, out bool retVal) && !retVal);
-            if (Is64Bit)
-            {
-                //Debug.WriteLine("Changing to 64bit code...");
-                if (size == 8) size = 16; //change to 64bit
-                return get64bitCode(process, name, path, size); //jump over to 64bit code grab
-            }
-
-            if (path != "")
-                theCode = LoadCode(name, path);
-            else
-                theCode = name;
-
-            if (theCode == "")
-            {
-                //Debug.WriteLine("ERROR: LoadCode returned blank. NAME:" + name + " PATH:" + path);
-                return UIntPtr.Zero;
-            }
-            else
-            {
-                //Debug.WriteLine("Found code=" + theCode + " NAME:" + name + " PATH:" + path);
-            }
-
-            // remove spaces
-            if (theCode.Contains(" "))
-                theCode.Replace(" ", String.Empty);
-
-            if (!theCode.Contains("+") && !theCode.Contains(",")) return new UIntPtr(Convert.ToUInt32(theCode, 16));
-
-            string newOffsets = theCode;
-
-            if (theCode.Contains("+"))
-                newOffsets = theCode.Substring(theCode.IndexOf('+') + 1);
-
-            byte[] memoryAddress = new byte[size];
-
-            if (newOffsets.Contains(','))
-            {
-                List<int> offsetsList = new List<int>();
-
-                string[] newerOffsets = newOffsets.Split(',');
-                foreach (string oldOffsets in newerOffsets)
-                {
-                    string test = oldOffsets;
-                    if (oldOffsets.Contains("0x")) test = oldOffsets.Replace("0x", "");
-                    int preParse = 0;
-                    if (!oldOffsets.Contains("-"))
-                        preParse = Int32.Parse(test, NumberStyles.AllowHexSpecifier);
-                    else
-                    {
-                        test = test.Replace("-", "");
-                        preParse = Int32.Parse(test, NumberStyles.AllowHexSpecifier);
-                        preParse = preParse * -1;
-                    }
-                    offsetsList.Add(preParse);
-                }
-                int[] offsets = offsetsList.ToArray();
-
-                if (theCode.Contains("base") || theCode.Contains("main"))
-                    ReadProcessMemory(process.Handle, (UIntPtr)((int)process.MainModule.BaseAddress + offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                else if (!theCode.Contains("base") && !theCode.Contains("main") && theCode.Contains("+"))
-                {
-                    string[] moduleName = theCode.Split('+');
-                    IntPtr altModule = IntPtr.Zero;
-                    if (!moduleName[0].Contains(".dll") && !moduleName[0].Contains(".exe"))
-                    {
-                        string theAddr = moduleName[0];
-                        if (theAddr.Contains("0x")) theAddr = theAddr.Replace("0x", "");
-                        altModule = (IntPtr)Int32.Parse(theAddr, NumberStyles.HexNumber);
-                    }
-                    else
-                    {
-                        try
-                        {
-                            altModule = modules[moduleName[0]];
-                        }
-                        catch
-                        {
-                            //Debug.WriteLine("Module " + moduleName[0] + " was not found in module list!");
-                            // Debug.WriteLine("Modules: " + string.Join(",", modules));
-                        }
-                    }
-                    ReadProcessMemory(process.Handle, (UIntPtr)((int)altModule + offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                }
-                else
-                    ReadProcessMemory(process.Handle, (UIntPtr)(offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-
-                uint num1 = BitConverter.ToUInt32(memoryAddress, 0); //ToUInt64 causes arithmetic overflow.
-
-                UIntPtr base1 = (UIntPtr)0;
-
-                for (int i = 1; i < offsets.Length; i++)
-                {
-                    base1 = new UIntPtr(Convert.ToUInt32(num1 + offsets[i]));
-                    ReadProcessMemory(process.Handle, base1, memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                    num1 = BitConverter.ToUInt32(memoryAddress, 0); //ToUInt64 causes arithmetic overflow.
-                }
-                return base1;
-            }
-            else // no offsets
-            {
-                int trueCode = Convert.ToInt32(newOffsets, 16);
-                IntPtr altModule = IntPtr.Zero;
-                //Debug.WriteLine("newOffsets=" + newOffsets);
-                if (theCode.Contains("base") || theCode.Contains("main"))
-                    altModule = process.MainModule.BaseAddress;
-                else if (!theCode.Contains("base") && !theCode.Contains("main") && theCode.Contains("+"))
-                {
-                    string[] moduleName = theCode.Split('+');
-                    if (!moduleName[0].Contains(".dll") && !moduleName[0].Contains(".exe"))
-                    {
-                        string theAddr = moduleName[0];
-                        if (theAddr.Contains("0x")) theAddr = theAddr.Replace("0x", "");
-                        altModule = (IntPtr)Int32.Parse(theAddr, NumberStyles.HexNumber);
-                    }
-                    else
-                    {
-                        try
-                        {
-                            altModule = modules[moduleName[0]];
-                        }
-                        catch
-                        {
-                            //Debug.WriteLine("Module " + moduleName[0] + " was not found in module list!");
-                            //Debug.WriteLine("Modules: " + string.Join(",", modules));
-                        }
-                    }
-                }
-                else
-                    altModule = modules[theCode.Split('+')[0]];
-                return (UIntPtr)((int)altModule + trueCode);
-            }
-        }
-        public UIntPtr get64bitCode(Process process, string name, string path = "", int size = 16)
-        {
-            string theCode = "";
-            if (path != "")
-                theCode = LoadCode(name, path);
-            else
-                theCode = name;
-
-            if (theCode == "")
-                return UIntPtr.Zero;
-
-            // remove spaces
-            if (theCode.Contains(" "))
-                theCode.Replace(" ", String.Empty);
-
-            string newOffsets = theCode;
-            if (theCode.Contains("+"))
-                newOffsets = theCode.Substring(theCode.IndexOf('+') + 1);
-
-            byte[] memoryAddress = new byte[size];
-
-            if (!theCode.Contains("+") && !theCode.Contains(",")) return new UIntPtr(Convert.ToUInt64(theCode, 16));
-
-            if (newOffsets.Contains(','))
-            {
-                List<Int64> offsetsList = new List<Int64>();
-
-                string[] newerOffsets = newOffsets.Split(',');
-                foreach (string oldOffsets in newerOffsets)
-                {
-                    string test = oldOffsets;
-                    if (oldOffsets.Contains("0x")) test = oldOffsets.Replace("0x", "");
-                    Int64 preParse = 0;
-                    if (!oldOffsets.Contains("-"))
-                        preParse = Int64.Parse(test, NumberStyles.AllowHexSpecifier);
-                    else
-                    {
-                        test = test.Replace("-", "");
-                        preParse = Int64.Parse(test, NumberStyles.AllowHexSpecifier);
-                        preParse = preParse * -1;
-                    }
-                    offsetsList.Add(preParse);
-                }
-                Int64[] offsets = offsetsList.ToArray();
-
-                if (theCode.Contains("base") || theCode.Contains("main"))
-                    ReadProcessMemory(process.Handle, (UIntPtr)((Int64)process.MainModule.BaseAddress + offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                else if (!theCode.Contains("base") && !theCode.Contains("main") && theCode.Contains("+"))
-                {
-                    string[] moduleName = theCode.Split('+');
-                    IntPtr altModule = IntPtr.Zero;
-                    if (!moduleName[0].Contains(".dll") && !moduleName[0].Contains(".exe"))
-                        altModule = (IntPtr)Int64.Parse(moduleName[0], System.Globalization.NumberStyles.HexNumber);
-                    else
-                    {
-                        try
-                        {
-                            altModule = modules[moduleName[0]];
-                        }
-                        catch
-                        {
-                            //Debug.WriteLine("Module " + moduleName[0] + " was not found in module list!");
-                            //Debug.WriteLine("Modules: " + string.Join(",", modules));
-                        }
-                    }
-                    ReadProcessMemory(process.Handle, (UIntPtr)((Int64)altModule + offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                }
-                else // no offsets
-                    ReadProcessMemory(process.Handle, (UIntPtr)(offsets[0]), memoryAddress, (UIntPtr)size, IntPtr.Zero);
-
-                Int64 num1 = BitConverter.ToInt64(memoryAddress, 0);
-
-                UIntPtr base1 = (UIntPtr)0;
-
-                for (int i = 1; i < offsets.Length; i++)
-                {
-                    base1 = new UIntPtr(Convert.ToUInt64(num1 + offsets[i]));
-                    ReadProcessMemory(process.Handle, base1, memoryAddress, (UIntPtr)size, IntPtr.Zero);
-                    num1 = BitConverter.ToInt64(memoryAddress, 0);
-                }
-                return base1;
-            }
-            else
-            {
-                Int64 trueCode = Convert.ToInt64(newOffsets, 16);
-                IntPtr altModule = IntPtr.Zero;
-                if (theCode.Contains("base") || theCode.Contains("main"))
-                    altModule = process.MainModule.BaseAddress;
-                else if (!theCode.Contains("base") && !theCode.Contains("main") && theCode.Contains("+"))
-                {
-                    string[] moduleName = theCode.Split('+');
-                    if (!moduleName[0].Contains(".dll") && !moduleName[0].Contains(".exe"))
-                    {
-                        string theAddr = moduleName[0];
-                        if (theAddr.Contains("0x")) theAddr = theAddr.Replace("0x", "");
-                        altModule = (IntPtr)Int64.Parse(theAddr, NumberStyles.HexNumber);
-                    }
-                    else
-                    {
-                        try
-                        {
-                            altModule = modules[moduleName[0]];
-                        }
-                        catch
-                        {
-                            //Debug.WriteLine("Module " + moduleName[0] + " was not found in module list!");
-                            //Debug.WriteLine("Modules: " + string.Join(",", modules));
-                        }
-                    }
-                }
-                else
-                    altModule = modules[theCode.Split('+')[0]];
-                return (UIntPtr)((Int64)altModule + trueCode);
-            }
-        }
+        }   
         public Task<IEnumerable<long>> AoBScan(Process process, string search, bool writable = false, bool executable = true, string file = "")
         {
             return AoBScan(process, 0, long.MaxValue, search, writable, executable, file);
@@ -679,12 +423,7 @@ namespace CodeCaveInjecter
                 return bagResult.ToList().OrderBy(c => c).AsEnumerable();
             });
         }
-        public async Task<long> AoBScan(Process process, string code, long end, string search, string file = "")
-        {
-            long start = (long)getCode(process, code, file).ToUInt64();
 
-            return (await AoBScan(process, start, end, search, true, true, true, file)).FirstOrDefault();
-        }
         private long[] CompareScan(Process process, MemoryRegionResult item, byte[] aobPattern, byte[] mask)
         {
             if (mask.Length != aobPattern.Length)
@@ -783,22 +522,6 @@ namespace CodeCaveInjecter
 
             return returnCode.ToString();
         }
-        private int LoadIntCode(string name, string path)
-        {
-            try
-            {
-                int intValue = Convert.ToInt32(LoadCode(name, path), 16);
-                if (intValue >= 0)
-                    return intValue;
-                else
-                    return 0;
-            }
-            catch
-            {
-                Debug.WriteLine("ERROR: LoadIntCode function crashed!");
-                return 0;
-            }
-        }
 
         public Dictionary<string, IntPtr> modules = new Dictionary<string, IntPtr>();
         struct MemoryRegionResult
@@ -851,36 +574,57 @@ namespace CodeCaveInjecter
         private byte[] GetByteCode(string[] asm_code,IntPtr CaveAddress)
         {
             List<byte> Script = new List<byte>();
-            foreach(string asm in asm_code)
+            string XVar = "";
+            if (Is64Bit) { XVar = "X16"; } else { XVar = "X8"; }
+
+            foreach (string asm in asm_code)
             {
                 string[] code = asm.Split(' ');
                 foreach(string xcode in code)
                 {
-                    if(xcode.Contains("CaveAddress"))
+                   
+                    if (xcode.Contains("JmpToAddress"))
                     {
-                        string XVar = "";
-                        if (Is64Bit) { XVar = "X16"; }
-                        else { XVar = "X8"; }
+                        string sAddress = xcode.Replace("JmpToAddress(", "").Replace(")", "");
+                        if (sAddress.Contains("CaveAddress+")) 
+                        {
+                            sAddress = sAddress.Replace("CaveAddress+", "");
+                            IntPtr newAddress = CaveAddress + int.Parse(sAddress, NumberStyles.HexNumber) - 0x01; sAddress = newAddress.ToString(XVar);
+                        }
+                        int address = int.Parse(sAddress, NumberStyles.HexNumber);
+                        sAddress = address.ToString(XVar);
+
+                        IntPtr Address = (IntPtr)int.Parse(sAddress, NumberStyles.HexNumber);
+                        byte[] bAddress = BitConverter.GetBytes((int)((long)(Address - sAddress.Length + 3) - (long)(CaveAddress + Script.ToArray().Length)));
+                        List<byte> jmp = new List<byte>(new byte[] { 0xE9 });
+                        jmp.AddRange(bAddress);
+                        Script.AddRange(jmp);
+                    }
+                    else if(xcode.Contains("JneToAddress"))
+                    {
+                        string sAddress = xcode.Replace("JneToAddress(", "").Replace(")", "");
+                        if (sAddress.Contains("CaveAddress+"))
+                        {
+                            sAddress = sAddress.Replace("CaveAddress+", "");
+                            IntPtr newAddress = CaveAddress + int.Parse(sAddress, NumberStyles.HexNumber) - 0x01; sAddress = newAddress.ToString(XVar);
+                        }
+
+                        int address = int.Parse(sAddress, NumberStyles.HexNumber);
+                        sAddress = address.ToString(XVar);
+
+                        IntPtr Address = (IntPtr)int.Parse(sAddress, NumberStyles.HexNumber);
+                        byte[] bAddress = BitConverter.GetBytes((int)((long)(Address - sAddress.Length + 3) - (long)(CaveAddress + Script.ToArray().Length)));
+                        List<byte> jmp = new List<byte>(new byte[] { 0x0F,0x85 });
+                        jmp.AddRange(bAddress);
+                        Script.AddRange(jmp);
+                    }
+                    else if (xcode.Contains("CaveAddress"))
+                    {
                         if (xcode.Contains("+"))
                         {
                             string[] result = xcode.Split('+');
                             IntPtr newAddress = CaveAddress + int.Parse(result[1], NumberStyles.HexNumber);
                             Script.AddRange(StringToByteArray(newAddress.ToString(XVar)).Reverse().ToArray());
-                        }
-                        else if (xcode.Contains("JmpToAddress"))
-                        {
-                            string sAddress = xcode.Replace("JmpToAddress(", "").Replace(")", "");
-                            string XVar;
-                            if (sAddress.Length <= 8) { XVar = "X8"; } else { XVar = "X16"; }
-                            
-                            int address = int.Parse(sAddress, NumberStyles.HexNumber);
-                            sAddress = address.ToString(XVar);
-
-                            IntPtr Address = (IntPtr)int.Parse(sAddress, NumberStyles.HexNumber);
-                            byte[] bAddress = BitConverter.GetBytes((int)((long)(Address-sAddress.Length +3) - (long)(CaveAddress + Script.ToArray().Length)));
-                            List<byte> jmp = new List<byte>(new byte[] { 0xE9 });
-                            jmp.AddRange(bAddress);
-                            Script.AddRange(jmp);
                         }
                         else
                         {
