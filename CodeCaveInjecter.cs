@@ -614,9 +614,9 @@ namespace CodeCaveInjecter
 
                         IntPtr Address = (IntPtr)int.Parse(sAddress, NumberStyles.HexNumber);
                         byte[] bAddress = BitConverter.GetBytes((int)((long)(Address - sAddress.Length + 3) - (long)(CaveAddress + Script.ToArray().Length)));
-                        List<byte> jmp = new List<byte>(new byte[] { 0x0F,0x85 });
-                        jmp.AddRange(bAddress);
-                        Script.AddRange(jmp);
+                        List<byte> jne = new List<byte>(new byte[] { 0x0F,0x85 });
+                        jne.AddRange(bAddress);
+                        Script.AddRange(jne);
                     }
                     else if (xcode.Contains("CaveAddress"))
                     {
